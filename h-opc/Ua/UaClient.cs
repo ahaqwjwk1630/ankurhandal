@@ -53,7 +53,7 @@ namespace Hylasoft.Opc.Ua
         /// <summary>
         /// OPC Foundation underlying session object
         /// </summary>
-        protected Session Session
+        public Session Session
         {
             get
             {
