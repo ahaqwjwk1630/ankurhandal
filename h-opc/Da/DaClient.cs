@@ -17,12 +17,27 @@ namespace Hylasoft.Opc.Da
     /// </summary>
     public class DaClient : IOpcClient
     {
-        private readonly URL _url;
-        private OpcDa.Server _server;
-        private long _sub;
+        #region # Fields and Constructors
 
-        // default monitor interval in Milliseconds
+        /// <summary>
+        /// Default monitor interval in Milliseconds
+        /// </summary>
         private const int DefaultMonitorInterval = 100;
+
+        /// <summary>
+        /// OPC URL
+        /// </summary>
+        private readonly URL _url;
+
+        /// <summary>
+        /// OpcDa underlying server object
+        /// </summary>
+        private OpcDa.Server _server;
+
+        /// <summary>
+        /// Subscription auto identifier
+        /// </summary>
+        private long _sub;
 
         /// <summary>
         /// Initialize a new Data Access Client
@@ -48,6 +63,58 @@ namespace Hylasoft.Opc.Da
             this._url = serverUrl;
         }
 
+        #endregion
+
+        #region # Properties
+
+        #region Monitor interval in Milliseconds —— int? MonitorInterval
+        /// <summary>
+        /// Monitor interval in Milliseconds
+        /// </summary>
+        public int? MonitorInterval { get; set; }
+        #endregion
+
+        #region Gets the current status of the OPC Client —— OpcStatus Status
+        /// <summary>
+        /// Gets the current status of the OPC Client
+        /// </summary>
+        public OpcStatus Status { get; private set; }
+        #endregion
+
+        #region OpcDa underlying server object —— OpcDa.Server Server
+        /// <summary>
+        /// OpcDa underlying server object
+        /// </summary>
+        public OpcDa.Server Server
+        {
+            get { return this._server; }
+        }
+        #endregion
+
+        #endregion
+
+        #region # Methods
+
+        //Implements
+
+        #region Connect the client to the OPC Server —— void Connect()
+        /// <summary>
+        /// Connect the client to the OPC Server
+        /// </summary>
+        public void Connect()
+        {
+            if (this.Status == OpcStatus.Connected)
+            {
+                return;
+            }
+
+            this._server = new OpcDa.Server(new Factory(), this._url);
+            this._server.Connect();
+            this.Status = OpcStatus.Connected;
+        }
+        #endregion
+
+        #region Gets the datatype of an OPC tag —— Type GetDataType(string tag)
         /// <summary>
         /// Gets the datatype of an OPC tag
         /// </summary>
@@ -57,50 +124,49 @@ namespace Hylasoft.Opc.Da
         {
             OpcDa.Item item = new OpcDa.Item { ItemName = tag };
             OpcDa.ItemProperty result;
+
             try
             {
-                OpcDa.ItemPropertyCollection propertyCollection = this._server.GetProperties(new[] { item }, new[] { new OpcDa.PropertyID(1) }, false)[0];
+                OpcDa.ItemPropertyCollection propertyCollection = this._server.GetProperties(new ItemIdentifier[] { item }, new[] { new OpcDa.PropertyID(1) }, false)[0];
                 result = propertyCollection[0];
             }
             catch (NullReferenceException)
             {
                 throw new OpcException("Could not find node because server not connected.");
             }
+
             return result.DataType;
         }
+        #endregion
 
+        #region Read a tag —— ReadEvent Read(string tag)
         /// <summary>
-        /// OpcDa underlying server object.
+        /// Read a tag
         /// </summary>
-        public OpcDa.Server Server
+        /// <param name="tag">The fully-qualified identifier of the tag. You can specify a subfolder by using a comma delimited name.
+        /// E.g: the tag `foo.bar` reads the tag `bar` on the folder `foo`</param>
+        /// <returns>The value retrieved from the OPC</returns>
+        public ReadEvent Read(string tag)
         {
-            get
+            OpcDa.Item item = new OpcDa.Item { ItemName = tag };
+            if (this.Status == OpcStatus.NotConnected)
             {
-                return this._server;
+                throw new OpcException("Server not connected. Cannot read tag.");
             }
+            OpcDa.ItemValueResult result = this._server.Read(new[] { item })[0];
+
+            ReadEvent readEvent = new ReadEvent();
+            readEvent.Value = result.Value;
+            readEvent.SourceTimestamp = result.Timestamp;
+            readEvent.ServerTimestamp = result.Timestamp;
+            if (result.Quality == OpcDa.Quality.Good) readEvent.Quality = Quality.Good;
+            if (result.Quality == OpcDa.Quality.Bad) readEvent.Quality = Quality.Bad;
+
+            return readEvent;
         }
+        #endregion
 
-        #region interface methods
-
-        /// <summary>
-        /// Connect the client to the OPC Server
-        /// </summary>
-        public void Connect()
-        {
-            if (this.Status == OpcStatus.Connected)
-                return;
-            this._server = new OpcDa.Server(new Factory(), this._url);
-            this._server.Connect();
-
-            this.Status = OpcStatus.Connected;
-        }
-
-        /// <summary>
-        /// Gets the current status of the OPC Client
-        /// </summary>
-        public OpcStatus Status { get; private set; }
-
-
+        #region Read a tag —— ReadEvent<T> Read<T>(string tag)
         /// <summary>
         /// Read a tag
         /// </summary>
@@ -110,25 +176,31 @@ namespace Hylasoft.Opc.Da
         /// <returns>The value retrieved from the OPC</returns>
         public ReadEvent<T> Read<T>(string tag)
         {
-            OpcDa.Item item = new OpcDa.Item { ItemName = tag };
-            if (this.Status == OpcStatus.NotConnected)
+            ReadEvent readEvent = this.Read(tag);
+
+            ReadEvent<T> readEventGeneric = new ReadEvent<T>
             {
-                throw new OpcException("Server not connected. Cannot read tag.");
-            }
-            OpcDa.ItemValueResult result = this._server.Read(new[] { item })[0];
-            T casted;
-            this.TryCastResult(result.Value, out casted);
+                Value = this.TryCastResult<T>(readEvent.Value),
+                Quality = readEvent.Quality,
+                ServerTimestamp = readEvent.ServerTimestamp,
+                SourceTimestamp = readEvent.SourceTimestamp
+            };
 
-            ReadEvent<T> readEvent = new ReadEvent<T>();
-            readEvent.Value = casted;
-            readEvent.SourceTimestamp = result.Timestamp;
-            readEvent.ServerTimestamp = result.Timestamp;
-            if (result.Quality == OpcDa.Quality.Good) readEvent.Quality = Quality.Good;
-            if (result.Quality == OpcDa.Quality.Bad) readEvent.Quality = Quality.Bad;
-
-            return readEvent;
+            return readEventGeneric;
         }
+        #endregion
 
+        #region Read a tag asynchronusly —— Task<ReadEvent<T>> ReadAsync<T>(string tag)
+        /// <summary>
+        /// Read a tag asynchronusly
+        /// </summary>
+        public async Task<ReadEvent<T>> ReadAsync<T>(string tag)
+        {
+            return await Task.Run(() => this.Read<T>(tag));
+        }
+        #endregion
+
+        #region Write a value on the specified opc tag —— void Write<T>(string tag, T item)
         /// <summary>
         /// Write a value on the specified opc tag
         /// </summary>
@@ -144,30 +216,66 @@ namespace Hylasoft.Opc.Da
                 Value = item
             };
             IdentifiedResult result = this._server.Write(new[] { itmVal })[0];
-            CheckResult(result, tag);
-        }
 
+            if (result == null)
+            {
+                throw new OpcException("The server replied with an empty response");
+            }
+            if (result.ResultID.ToString() != "S_OK")
+            {
+                throw new OpcException($"Invalid response from the server. (Response Status: {result.ResultID}, Opc Tag: {tag})");
+            }
+        }
+        #endregion
+
+        #region Write a value on the specified opc tag asynchronously —— Task WriteAsync<T>(string tag, T item)
         /// <summary>
-        /// Casts result of monitoring and reading values
+        /// Write a value on the specified opc tag asynchronously
         /// </summary>
-        /// <param name="value">Value to convert</param>
-        /// <param name="casted">The casted result</param>
-        /// <typeparam name="T">Type of object to try to cast</typeparam>
-        public void TryCastResult<T>(object value, out T casted)
+        public async Task WriteAsync<T>(string tag, T item)
         {
-            try
-            {
-                casted = (T)value;
-            }
-            catch (InvalidCastException)
-            {
-                throw new InvalidCastException(
-                  string.Format(
-                    "Could not monitor tag. Cast failed for type \"{0}\" on the new value \"{1}\" with type \"{2}\". Make sure tag data type matches.",
-                    typeof(T), value, value.GetType()));
-            }
+            await Task.Run(() => this.Write(tag, item));
         }
+        #endregion
 
+        #region Monitor the specified tag for changes —— void Monitor(string tag, Action<ReadEvent, Action> callback)
+        /// <summary>
+        /// Monitor the specified tag for changes
+        /// </summary>
+        /// <param name="tag">The fully-qualified identifier of the tag. You can specify a subfolder by using a comma delimited name.
+        /// E.g: the tag `foo.bar` monitors the tag `bar` on the folder `foo`</param>
+        /// <param name="callback">the callback to execute when the value is changed.
+        /// The first parameter is a MonitorEvent object which represents the data point, the second is an `unsubscribe` function to unsubscribe the callback</param>
+        public void Monitor(string tag, Action<ReadEvent, Action> callback)
+        {
+            OpcDa.SubscriptionState subItem = new OpcDa.SubscriptionState
+            {
+                Name = (++this._sub).ToString(CultureInfo.InvariantCulture),
+                Active = true,
+                UpdateRate = this.MonitorInterval ?? DefaultMonitorInterval
+            };
+            OpcDa.ISubscription sub = this._server.CreateSubscription(subItem);
+
+            // I have to start a new thread here because unsubscribing
+            // the subscription during a datachanged event causes a deadlock
+            Action unsubscribe = () => new Thread(o => this._server.CancelSubscription(sub)).Start();
+
+            sub.DataChanged += (handle, requestHandle, values) =>
+            {
+                ReadEvent monitorEvent = new ReadEvent();
+                monitorEvent.Value = values[0].Value;
+                monitorEvent.SourceTimestamp = values[0].Timestamp;
+                monitorEvent.ServerTimestamp = values[0].Timestamp;
+                if (values[0].Quality == OpcDa.Quality.Good) monitorEvent.Quality = Quality.Good;
+                if (values[0].Quality == OpcDa.Quality.Bad) monitorEvent.Quality = Quality.Bad;
+                callback(monitorEvent, unsubscribe);
+            };
+            sub.AddItems(new[] { new OpcDa.Item { ItemName = tag } });
+            sub.SetEnabled(true);
+        }
+        #endregion
+
+        #region Monitor the specified tag for changes —— void Monitor<T>(string tag, Action<ReadEvent<T>, Action> callback)
         /// <summary>
         /// Monitor the specified tag for changes
         /// </summary>
@@ -182,7 +290,7 @@ namespace Hylasoft.Opc.Da
             {
                 Name = (++this._sub).ToString(CultureInfo.InvariantCulture),
                 Active = true,
-                UpdateRate = DefaultMonitorInterval
+                UpdateRate = this.MonitorInterval ?? DefaultMonitorInterval
             };
             OpcDa.ISubscription sub = this._server.CreateSubscription(subItem);
 
@@ -192,8 +300,7 @@ namespace Hylasoft.Opc.Da
 
             sub.DataChanged += (handle, requestHandle, values) =>
             {
-                T casted;
-                this.TryCastResult(values[0].Value, out casted);
+                T casted = this.TryCastResult<T>(values[0].Value);
                 ReadEvent<T> monitorEvent = new ReadEvent<T>();
                 monitorEvent.Value = casted;
                 monitorEvent.SourceTimestamp = values[0].Timestamp;
@@ -205,7 +312,9 @@ namespace Hylasoft.Opc.Da
             sub.AddItems(new[] { new OpcDa.Item { ItemName = tag } });
             sub.SetEnabled(true);
         }
+        #endregion
 
+        #region Monitor the specified tags for changes —— void Monitor(IEnumerable<string> tags...
         /// <summary>
         /// Monitor the specified tags for changes
         /// </summary>
@@ -231,7 +340,7 @@ namespace Hylasoft.Opc.Da
             {
                 Name = (++this._sub).ToString(CultureInfo.InvariantCulture),
                 Active = true,
-                UpdateRate = DefaultMonitorInterval
+                UpdateRate = this.MonitorInterval ?? DefaultMonitorInterval
             };
             OpcDa.ISubscription sub = this._server.CreateSubscription(subItem);
 
@@ -269,44 +378,48 @@ namespace Hylasoft.Opc.Da
             sub.AddItems(tags.Select(tag => new OpcDa.Item { ItemName = tag }).ToArray());
             sub.SetEnabled(true);
         }
+        #endregion
 
-        /// <summary>
-        /// Read a tag asynchronusly
-        /// </summary>
-        public async Task<ReadEvent<T>> ReadAsync<T>(string tag)
-        {
-            return await Task.Run(() => this.Read<T>(tag));
-        }
-
-        /// <summary>
-        /// Write a value on the specified opc tag asynchronously
-        /// </summary>
-        public async Task WriteAsync<T>(string tag, T item)
-        {
-            await Task.Run(() => this.Write(tag, item));
-        }
-
+        #region Release unmanaged resources —— void Dispose()
         /// <summary>
         /// Performs application-defined tasks associated with freeing, releasing, or resetting unmanaged resources.
         /// </summary>
         public void Dispose()
         {
-            this._server?.Dispose();
-            this.Status = OpcStatus.NotConnected;
+            if (this.Server != null)
+            {
+                this._server.Dispose();
+                this.Status = OpcStatus.NotConnected;
 
-            GC.SuppressFinalize(this);
+                GC.SuppressFinalize(this);
+            }
         }
-
         #endregion
 
 
-        private static void CheckResult(IResult result, string tag)
+        //Private
+
+        #region Casts result of monitoring and reading values —— T TryCastResult<T>(object value)
+        /// <summary>
+        /// Casts result of monitoring and reading values
+        /// </summary>
+        /// <param name="value">Value to convert</param>
+        /// <typeparam name="T">Type of object to try to cast</typeparam>
+        /// <returns>The casted result</returns>
+        private T TryCastResult<T>(object value)
         {
-            if (result == null)
-                throw new OpcException("The server replied with an empty response");
-            if (result.ResultID.ToString() != "S_OK")
-                throw new OpcException(string.Format("Invalid response from the server. (Response Status: {0}, Opc Tag: {1})", result.ResultID, tag));
+            try
+            {
+                return (T)value;
+            }
+            catch (InvalidCastException)
+            {
+                throw new InvalidCastException($"Could not monitor tag. Cast failed for type \"{typeof(T)}\" on the new value \"{value}\" with type \"{value.GetType()}\". Make sure tag data type matches.");
+            }
         }
+        #endregion
+
+        #endregion
     }
 }
 

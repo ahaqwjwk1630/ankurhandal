@@ -16,8 +16,31 @@ namespace Hylasoft.Opc.Ua
       Justification = "Doesn't make sense to split this class")]
     public class UaClient : IOpcClient
     {
+        #region # Events, Fields and Constructors
+
+        /// <summary>
+        /// This event is raised when the connection to the OPC server is lost.
+        /// </summary>
+        public event EventHandler ServerConnectionLost;
+
+        /// <summary>
+        /// This event is raised when the connection to the OPC server is restored.
+        /// </summary>
+        public event EventHandler ServerConnectionRestored;
+
+        /// <summary>
+        /// Options to configure the UA client session
+        /// </summary>
         private readonly UaClientOptions _options = new UaClientOptions();
+
+        /// <summary>
+        /// OPC Server URL
+        /// </summary>
         private readonly Uri _serverUrl;
+
+        /// <summary>
+        /// OPC Foundation underlying session object
+        /// </summary>
         private Session _session;
 
         /// <summary>
@@ -42,6 +65,35 @@ namespace Hylasoft.Opc.Ua
             this.Status = OpcStatus.NotConnected;
         }
 
+        #endregion
+
+        #region # Properties
+
+        #region Monitor interval in Milliseconds —— int? MonitorInterval
+        /// <summary>
+        /// Monitor interval in Milliseconds
+        /// </summary>
+        public int? MonitorInterval { get; set; }
+        #endregion
+
+        #region Gets the current status of the OPC Client —— OpcStatus Status
+        /// <summary>
+        /// Gets the current status of the OPC Client
+        /// </summary>
+        public OpcStatus Status { get; private set; }
+        #endregion
+
+        #region OPC Foundation underlying session object —— Session Session
+        /// <summary>
+        /// OPC Foundation underlying session object
+        /// </summary>
+        public Session Session
+        {
+            get { return this._session; }
+        }
+        #endregion
+
+        #region Options to configure the UA client session —— UaClientOptions Options
         /// <summary>
         /// Options to configure the UA client session
         /// </summary>
@@ -49,37 +101,34 @@ namespace Hylasoft.Opc.Ua
         {
             get { return this._options; }
         }
+        #endregion
 
-        /// <summary>
-        /// OPC Foundation underlying session object
-        /// </summary>
-        public Session Session
-        {
-            get
-            {
-                return this._session;
-            }
-        }
+        #endregion
 
-        private void PostInitializeSession()
-        {
-            this.Status = OpcStatus.Connected;
-        }
+        #region # Methods
 
+        //Implements
+
+        #region Connect the client to the OPC Server —— void Connect()
         /// <summary>
         /// Connect the client to the OPC Server
         /// </summary>
         public void Connect()
         {
             if (this.Status == OpcStatus.Connected)
+            {
                 return;
+            }
+
             this._session = this.InitializeSession(this._serverUrl);
-            this._session.KeepAlive += this.SessionKeepAlive;
-            this._session.SessionClosing += this.SessionClosing;
+            this._session.KeepAlive += this.OnSessionKeepAlive;
+            this._session.SessionClosing += this.OnSessionClosing;
 
-            this.PostInitializeSession();
+            this.Status = OpcStatus.Connected;
         }
+        #endregion
 
+        #region Gets the datatype of an OPC tag —— Type GetDataType(string tag)
         /// <summary>
         /// Gets the datatype of an OPC tag
         /// </summary>
@@ -100,77 +149,36 @@ namespace Hylasoft.Opc.Ua
             BuiltInType type = results[0].WrappedValue.TypeInfo.BuiltInType;
             return Type.GetType("System." + type.ToString());
         }
+        #endregion
 
-        private void SessionKeepAlive(Session session, KeepAliveEventArgs e)
-        {
-            if (e.CurrentState != ServerState.Running)
-            {
-                if (this.Status == OpcStatus.Connected)
-                {
-                    this.Status = OpcStatus.NotConnected;
-                    this.NotifyServerConnectionLost();
-                }
-            }
-            else if (e.CurrentState == ServerState.Running)
-            {
-                if (this.Status == OpcStatus.NotConnected)
-                {
-                    this.Status = OpcStatus.Connected;
-                    this.NotifyServerConnectionRestored();
-                }
-            }
-        }
-
-        private void SessionClosing(object sender, EventArgs e)
-        {
-            this.Status = OpcStatus.NotConnected;
-            this.NotifyServerConnectionLost();
-        }
-
-
+        #region Read a tag —— ReadEvent Read(string tag)
         /// <summary>
-        /// Reconnect the OPC session
+        /// Read a tag
         /// </summary>
-        public void ReConnect()
+        /// <param name="tag">The fully-qualified identifier of the tag. You can specify a subfolder by using a comma delimited name.
+        /// E.g: the tag `foo.bar` reads the tag `bar` on the folder `foo`</param>
+        /// <returns>The value retrieved from the OPC</returns>
+        public ReadEvent Read(string tag)
         {
-            this.Status = OpcStatus.NotConnected;
-            this._session.Reconnect();
-            this.Status = OpcStatus.Connected;
-        }
+            ReadValueIdCollection nodesToRead = this.BuildReadValueIdCollection(tag, Attributes.Value);
+            this._session.Read(null, 0, TimestampsToReturn.Neither, nodesToRead, out DataValueCollection results, out DiagnosticInfoCollection diag);
+            DataValue val = results[0];
 
-        /// <summary>
-        /// Create a new OPC session, based on the current session parameters.
-        /// </summary>
-        public void RecreateSession()
-        {
-            this.Status = OpcStatus.NotConnected;
-            this._session = Session.Recreate(this._session);
-            this.PostInitializeSession();
-        }
-
-
-        /// <summary>
-        /// Gets the current status of the OPC Client
-        /// </summary>
-        public OpcStatus Status { get; private set; }
-
-
-        private ReadValueIdCollection BuildReadValueIdCollection(string tag, uint attributeId)
-        {
-            //Updated by Lee
-            NodeId nodeId = new NodeId(tag);
-            ReadValueIdCollection nodesToRead = new ReadValueIdCollection
+            ReadEvent readEvent = new ReadEvent
             {
-                new ReadValueId()
-                {
-                    NodeId = nodeId,
-                    AttributeId = attributeId
-                }
+                Value = val.Value,
+                SourceTimestamp = val.SourceTimestamp,
+                ServerTimestamp = val.ServerTimestamp
             };
 
-            return nodesToRead;
-        }
+            if (StatusCode.IsGood(val.StatusCode)) readEvent.Quality = Quality.Good;
+            if (StatusCode.IsBad(val.StatusCode)) readEvent.Quality = Quality.Bad;
 
+            return readEvent;
+        }
+        #endregion
+
+        #region Read a tag —— ReadEvent<T> Read<T>(string tag)
         /// <summary>
         /// Read a tag
         /// </summary>
@@ -181,27 +189,29 @@ namespace Hylasoft.Opc.Ua
         public ReadEvent<T> Read<T>(string tag)
         {
             ReadValueIdCollection nodesToRead = this.BuildReadValueIdCollection(tag, Attributes.Value);
-            DataValueCollection results;
-            DiagnosticInfoCollection diag;
             this._session.Read(
                 requestHeader: null,
                 maxAge: 0,
                 timestampsToReturn: TimestampsToReturn.Neither,
                 nodesToRead: nodesToRead,
-                results: out results,
-                diagnosticInfos: out diag);
+                results: out DataValueCollection results,
+                diagnosticInfos: out DiagnosticInfoCollection diag);
             DataValue val = results[0];
 
-            ReadEvent<T> readEvent = new ReadEvent<T>();
-            readEvent.Value = (T)val.Value;
-            readEvent.SourceTimestamp = val.SourceTimestamp;
-            readEvent.ServerTimestamp = val.ServerTimestamp;
+            ReadEvent<T> readEvent = new ReadEvent<T>
+            {
+                Value = (T)val.Value,
+                SourceTimestamp = val.SourceTimestamp,
+                ServerTimestamp = val.ServerTimestamp
+            };
             if (StatusCode.IsGood(val.StatusCode)) readEvent.Quality = Quality.Good;
             if (StatusCode.IsBad(val.StatusCode)) readEvent.Quality = Quality.Bad;
+
             return readEvent;
         }
+        #endregion
 
-
+        #region Read a tag asynchronously —— Task<ReadEvent<T>> ReadAsync<T>(string tag)
         /// <summary>
         /// Read a tag asynchronously
         /// </summary>
@@ -222,23 +232,25 @@ namespace Hylasoft.Opc.Ua
                 nodesToRead: nodesToRead,
                 callback: ar =>
                 {
-                    DataValueCollection results;
-                    DiagnosticInfoCollection diag;
                     ResponseHeader response = this._session.EndRead(
-                  result: ar,
-                  results: out results,
-                  diagnosticInfos: out diag);
+                      result: ar,
+                      results: out DataValueCollection results,
+                      diagnosticInfos: out DiagnosticInfoCollection diag);
 
                     try
                     {
                         this.CheckReturnValue(response.ServiceResult);
                         DataValue val = results[0];
-                        ReadEvent<T> readEvent = new ReadEvent<T>();
-                        readEvent.Value = (T)val.Value;
-                        readEvent.SourceTimestamp = val.SourceTimestamp;
-                        readEvent.ServerTimestamp = val.ServerTimestamp;
+
+                        ReadEvent<T> readEvent = new ReadEvent<T>
+                        {
+                            Value = (T)val.Value,
+                            SourceTimestamp = val.SourceTimestamp,
+                            ServerTimestamp = val.ServerTimestamp
+                        };
                         if (StatusCode.IsGood(val.StatusCode)) readEvent.Quality = Quality.Good;
                         if (StatusCode.IsBad(val.StatusCode)) readEvent.Quality = Quality.Bad;
+
                         taskCompletionSource.TrySetResult(readEvent);
                     }
                     catch (Exception ex)
@@ -250,23 +262,9 @@ namespace Hylasoft.Opc.Ua
 
             return taskCompletionSource.Task;
         }
+        #endregion
 
-
-        private WriteValueCollection BuildWriteValueCollection(string tag, uint attributeId, object dataValue)
-        {
-            //Updated by Lee
-            WriteValue valueToWrite = new WriteValue
-            {
-                NodeId = new NodeId(tag),
-                AttributeId = attributeId,
-                Value = { Value = dataValue }
-            };
-
-            WriteValueCollection valuesToWrite = new WriteValueCollection { valueToWrite };
-
-            return valuesToWrite;
-        }
-
+        #region Write a value on the specified opc tag —— void Write<T>(string tag, T item)
         /// <summary>
         /// Write a value on the specified opc tag
         /// </summary>
@@ -277,18 +275,13 @@ namespace Hylasoft.Opc.Ua
         public void Write<T>(string tag, T item)
         {
             WriteValueCollection nodesToWrite = this.BuildWriteValueCollection(tag, Attributes.Value, item);
-
-            StatusCodeCollection results;
-            DiagnosticInfoCollection diag;
-            this._session.Write(
-                requestHeader: null,
-                nodesToWrite: nodesToWrite,
-                results: out results,
-                diagnosticInfos: out diag);
+            this._session.Write(null, nodesToWrite, out StatusCodeCollection results, out DiagnosticInfoCollection diag);
 
             this.CheckReturnValue(results[0]);
         }
+        #endregion
 
+        #region Write a value on the specified opc tag asynchronously —— Task WriteAsync<T>(string tag, T item)
         /// <summary>
         /// Write a value on the specified opc tag asynchronously
         /// </summary>
@@ -307,12 +300,10 @@ namespace Hylasoft.Opc.Ua
                 nodesToWrite: nodesToWrite,
                 callback: ar =>
                 {
-                    StatusCodeCollection results;
-                    DiagnosticInfoCollection diag;
                     ResponseHeader response = this._session.EndWrite(
-                  result: ar,
-                  results: out results,
-                  diagnosticInfos: out diag);
+                      result: ar,
+                      results: out StatusCodeCollection results,
+                      diagnosticInfos: out DiagnosticInfoCollection diag);
                     try
                     {
                         this.CheckReturnValue(response.ServiceResult);
@@ -325,10 +316,73 @@ namespace Hylasoft.Opc.Ua
                     }
                 },
                 asyncState: null);
+
             return taskCompletionSource.Task;
         }
+        #endregion
 
+        #region Monitor the specified tag for changes —— void Monitor(string tag, Action<ReadEvent, Action> callback)
+        /// <summary>
+        /// Monitor the specified tag for changes
+        /// </summary>
+        /// <param name="tag">The fully-qualified identifier of the tag. You can specify a subfolder by using a comma delimited name.
+        /// E.g: the tag `foo.bar` monitors the tag `bar` on the folder `foo`</param>
+        /// <param name="callback">the callback to execute when the value is changed.
+        /// The first parameter is a MonitorEvent object which represents the data point, the second is an `unsubscribe` function to unsubscribe the callback</param>
+        public void Monitor(string tag, Action<ReadEvent, Action> callback)
+        {
+            //Updated by Lee
+            NodeId nodeId = new NodeId(tag);
 
+            Subscription sub = new Subscription
+            {
+                PublishingInterval = this._options.DefaultMonitorInterval,
+                PublishingEnabled = true,
+                LifetimeCount = this._options.SubscriptionLifetimeCount,
+                KeepAliveCount = this._options.SubscriptionKeepAliveCount,
+                DisplayName = tag,
+                Priority = byte.MaxValue
+            };
+
+            MonitoredItem item = new MonitoredItem
+            {
+                StartNodeId = nodeId,
+                AttributeId = Attributes.Value,
+                DisplayName = tag,
+                SamplingInterval = this._options.DefaultMonitorInterval
+            };
+            sub.AddItem(item);
+            this._session.AddSubscription(sub);
+            sub.Create();
+            sub.ApplyChanges();
+
+            item.Notification += (monitoredItem, args) =>
+            {
+                MonitoredItemNotification p = (MonitoredItemNotification)args.NotificationValue;
+                object value = p.Value.WrappedValue.Value;
+                Action unsubscribe = () =>
+                {
+                    sub.RemoveItems(sub.MonitoredItems);
+                    sub.Delete(true);
+                    this._session.RemoveSubscription(sub);
+                    sub.Dispose();
+                };
+
+                ReadEvent monitorEvent = new ReadEvent
+                {
+                    Value = value,
+                    SourceTimestamp = p.Value.SourceTimestamp,
+                    ServerTimestamp = p.Value.ServerTimestamp
+                };
+                if (StatusCode.IsGood(p.Value.StatusCode)) monitorEvent.Quality = Quality.Good;
+                if (StatusCode.IsBad(p.Value.StatusCode)) monitorEvent.Quality = Quality.Bad;
+
+                callback(monitorEvent, unsubscribe);
+            };
+        }
+        #endregion
+
+        #region Monitor the specified tag for changes —— void Monitor<T>(string tag, Action<ReadEvent<T>, Action> callback)
         /// <summary>
         /// Monitor the specified tag for changes
         /// </summary>
@@ -376,16 +430,21 @@ namespace Hylasoft.Opc.Ua
                     sub.Dispose();
                 };
 
-                ReadEvent<T> monitorEvent = new ReadEvent<T>();
-                monitorEvent.Value = (T)t;
-                monitorEvent.SourceTimestamp = p.Value.SourceTimestamp;
-                monitorEvent.ServerTimestamp = p.Value.ServerTimestamp;
+                ReadEvent<T> monitorEvent = new ReadEvent<T>
+                {
+                    Value = (T)t,
+                    SourceTimestamp = p.Value.SourceTimestamp,
+                    ServerTimestamp = p.Value.ServerTimestamp
+                };
                 if (StatusCode.IsGood(p.Value.StatusCode)) monitorEvent.Quality = Quality.Good;
                 if (StatusCode.IsBad(p.Value.StatusCode)) monitorEvent.Quality = Quality.Bad;
+
                 callback(monitorEvent, unsubscribe);
             };
         }
+        #endregion
 
+        #region Monitor the specified tags for changes —— void Monitor(IEnumerable<string> tags...
         /// <summary>
         /// Monitor the specified tags for changes
         /// </summary>
@@ -442,10 +501,12 @@ namespace Hylasoft.Opc.Ua
                 {
                     MonitoredItemNotification monitoredItemNotification = (MonitoredItemNotification)args.NotificationValue;
 
-                    ReadEvent monitorEvent = new ReadEvent();
-                    monitorEvent.Value = monitoredItemNotification.Value.WrappedValue.Value;
-                    monitorEvent.SourceTimestamp = monitoredItemNotification.Value.SourceTimestamp;
-                    monitorEvent.ServerTimestamp = monitoredItemNotification.Value.ServerTimestamp;
+                    ReadEvent monitorEvent = new ReadEvent
+                    {
+                        Value = monitoredItemNotification.Value.WrappedValue.Value,
+                        SourceTimestamp = monitoredItemNotification.Value.SourceTimestamp,
+                        ServerTimestamp = monitoredItemNotification.Value.ServerTimestamp
+                    };
                     if (StatusCode.IsGood(monitoredItemNotification.Value.StatusCode)) monitorEvent.Quality = Quality.Good;
                     if (StatusCode.IsBad(monitoredItemNotification.Value.StatusCode)) monitorEvent.Quality = Quality.Bad;
 
@@ -467,7 +528,9 @@ namespace Hylasoft.Opc.Ua
             sub.Create();
             sub.ApplyChanges();
         }
+        #endregion
 
+        #region Releasing unmanaged resources —— void Dispose()
         /// <summary>
         /// Performs application-defined tasks associated with freeing, releasing, or resetting unmanaged resources.
         /// </summary>
@@ -479,36 +542,43 @@ namespace Hylasoft.Opc.Ua
                 this._session.Close();
                 this._session.Dispose();
                 this.Status = OpcStatus.NotConnected;
+
+                GC.SuppressFinalize(this);
             }
-            GC.SuppressFinalize(this);
         }
+        #endregion
 
-        private void CheckReturnValue(StatusCode status)
-        {
-            if (!StatusCode.IsGood(status))
-                throw new OpcException(string.Format("Invalid response from the server. (Response Status: {0})", status), status);
-        }
 
+        //Public
+
+        #region Reconnect the OPC session —— void ReConnect()
         /// <summary>
-        /// Return identity login object for a given URI.
+        /// Reconnect the OPC session
         /// </summary>
-        /// <param name="url">Login URI</param>
-        /// <returns>AnonUser or User with name and password</returns>
-        private UserIdentity GetIdentity(Uri url)
+        public void ReConnect()
         {
-            if (this._options.UserIdentity != null)
-            {
-                return this._options.UserIdentity;
-            }
-            UserIdentity uriLogin = new UserIdentity();
-            if (!string.IsNullOrEmpty(url.UserInfo))
-            {
-                string[] uis = url.UserInfo.Split(':');
-                uriLogin = new UserIdentity(uis[0], uis[1]);
-            }
-            return uriLogin;
+            this.Status = OpcStatus.NotConnected;
+            this._session.Reconnect();
+            this.Status = OpcStatus.Connected;
         }
+        #endregion
 
+        #region Create a new OPC session, based on the current session parameters —— void RecreateSession()
+        /// <summary>
+        /// Create a new OPC session, based on the current session parameters.
+        /// </summary>
+        public void RecreateSession()
+        {
+            this.Status = OpcStatus.NotConnected;
+            this._session = Session.Recreate(this._session);
+            this.Status = OpcStatus.Connected;
+        }
+        #endregion
+
+
+        //Private
+
+        #region Crappy method to initialize the session —— Session InitializeSession(Uri url)
         /// <summary>
         /// Crappy method to initialize the session. I don't know what many of these things do, sincerely.
         /// </summary>
@@ -589,27 +659,127 @@ namespace Hylasoft.Opc.Ua
 
             return session;
         }
+        #endregion
 
-        private void NotifyServerConnectionLost()
-        {
-            if (this.ServerConnectionLost != null) this.ServerConnectionLost(this, EventArgs.Empty);
-        }
-
-        private void NotifyServerConnectionRestored()
-        {
-            if (this.ServerConnectionRestored != null) this.ServerConnectionRestored(this, EventArgs.Empty);
-        }
-
+        #region Return identity login object for a given URI —— UserIdentity GetIdentity(Uri url)
         /// <summary>
-        /// This event is raised when the connection to the OPC server is lost.
+        /// Return identity login object for a given URI.
         /// </summary>
-        public event EventHandler ServerConnectionLost;
+        /// <param name="url">Login URI</param>
+        /// <returns>AnonUser or User with name and password</returns>
+        private UserIdentity GetIdentity(Uri url)
+        {
+            if (this._options.UserIdentity != null)
+            {
+                return this._options.UserIdentity;
+            }
 
+            UserIdentity uriLogin = new UserIdentity();
+
+            if (!string.IsNullOrEmpty(url.UserInfo))
+            {
+                string[] uis = url.UserInfo.Split(':');
+                uriLogin = new UserIdentity(uis[0], uis[1]);
+            }
+
+            return uriLogin;
+        }
+        #endregion
+
+        #region To build nodeId collection to read —— ReadValueIdCollection BuildReadValueIdCollection(...
         /// <summary>
-        /// This event is raised when the connection to the OPC server is restored.
+        /// To build nodeId collection to read
         /// </summary>
-        public event EventHandler ServerConnectionRestored;
+        private ReadValueIdCollection BuildReadValueIdCollection(string tag, uint attributeId)
+        {
+            //Updated by Lee
+            NodeId nodeId = new NodeId(tag);
+            ReadValueIdCollection nodesToRead = new ReadValueIdCollection
+            {
+                new ReadValueId()
+                {
+                    NodeId = nodeId,
+                    AttributeId = attributeId
+                }
+            };
 
+            return nodesToRead;
+        }
+        #endregion
+
+        #region To build nodeId collection to write —— WriteValueCollection BuildWriteValueCollection(...
+        /// <summary>
+        /// To build nodeId collection to write
+        /// </summary>
+        private WriteValueCollection BuildWriteValueCollection(string tag, uint attributeId, object dataValue)
+        {
+            //Updated by Lee
+            WriteValue valueToWrite = new WriteValue
+            {
+                NodeId = new NodeId(tag),
+                AttributeId = attributeId,
+                Value = { Value = dataValue }
+            };
+
+            WriteValueCollection valuesToWrite = new WriteValueCollection { valueToWrite };
+
+            return valuesToWrite;
+        }
+        #endregion
+
+        #region To check the return value —— void CheckReturnValue(StatusCode status)
+        /// <summary>
+        /// To check the return value
+        /// </summary>
+        private void CheckReturnValue(StatusCode status)
+        {
+            if (!StatusCode.IsGood(status))
+            {
+                throw new OpcException($"Invalid response from the server. (Response Status: {status})", status);
+            }
+        }
+        #endregion
+
+
+        //EventHandlers
+
+        #region SessionKeepAlive event handler —— void OnSessionKeepAlive(Session session, KeepAliveEventArgs e)
+        /// <summary>
+        /// SessionKeepAlive event handler
+        /// </summary>
+        private void OnSessionKeepAlive(Session session, KeepAliveEventArgs e)
+        {
+            if (e.CurrentState != ServerState.Running)
+            {
+                if (this.Status == OpcStatus.Connected)
+                {
+                    this.Status = OpcStatus.NotConnected;
+                    this.ServerConnectionLost?.Invoke(this, EventArgs.Empty);
+                }
+            }
+            else if (e.CurrentState == ServerState.Running)
+            {
+                if (this.Status == OpcStatus.NotConnected)
+                {
+                    this.Status = OpcStatus.Connected;
+                    this.ServerConnectionRestored?.Invoke(this, EventArgs.Empty);
+                }
+            }
+        }
+        #endregion
+
+        #region SessionClosing event handler —— void OnSessionClosing(object sender, EventArgs e)
+        /// <summary>
+        /// SessionClosing event handler
+        /// </summary>
+        private void OnSessionClosing(object sender, EventArgs e)
+        {
+            this.Status = OpcStatus.NotConnected;
+            this.ServerConnectionLost?.Invoke(this, EventArgs.Empty);
+        }
+        #endregion
+
+        #endregion
     }
 
 }
