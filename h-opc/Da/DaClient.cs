@@ -200,6 +200,55 @@ namespace Hylasoft.Opc.Da
         }
         #endregion
 
+        #region Read tags —— IDictionary<string, ReadEvent> Read(IEnumerable<string> tags)
+        /// <summary>
+        /// Read tags
+        /// </summary>
+        /// <param name="tags">The fully-qualified identifiers of the tags. You can specify a subfolder by using a comma delimited name.
+        /// E.g: the tag `foo.bar` reads the tag `bar` on the folder `foo`</param>
+        /// <returns>The key value pairs retrieved from the OPC</returns>
+        public IDictionary<string, ReadEvent> Read(IEnumerable<string> tags)
+        {
+            #region # Check
+
+            tags = tags?.Distinct().ToArray() ?? new string[0];
+
+            if (!tags.Any())
+            {
+                return new Dictionary<string, ReadEvent>();
+            }
+            if (this.Status == OpcStatus.NotConnected)
+            {
+                throw new OpcException("Server not connected. Cannot read tag.");
+            }
+
+            #endregion
+
+            IEnumerable<OpcDa.Item> items =
+                from tag in tags
+                let item = new OpcDa.Item { ItemName = tag }
+                select item;
+
+            OpcDa.ItemValueResult[] results = this._server.Read(items.ToArray());
+
+            IDictionary<string, ReadEvent> readEvents = new ConcurrentDictionary<string, ReadEvent>();
+            foreach (OpcDa.ItemValueResult result in results)
+            {
+                ReadEvent readEvent = new ReadEvent();
+                readEvent.Value = result.Value;
+                readEvent.SourceTimestamp = result.Timestamp;
+                readEvent.ServerTimestamp = result.Timestamp;
+                if (result.Quality == OpcDa.Quality.Good) readEvent.Quality = Quality.Good;
+                if (result.Quality == OpcDa.Quality.Bad) readEvent.Quality = Quality.Bad;
+
+                string tag = result.ItemName.ToString();
+                readEvents.Add(tag, readEvent);
+            }
+
+            return readEvents;
+        }
+        #endregion
+
         #region Write a value on the specified opc tag —— void Write<T>(string tag, T item)
         /// <summary>
         /// Write a value on the specified opc tag

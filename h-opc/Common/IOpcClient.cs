@@ -74,6 +74,16 @@ namespace Hylasoft.Opc.Common
         Task<ReadEvent<T>> ReadAsync<T>(string tag);
         #endregion
 
+        #region Read tags —— IDictionary<string, ReadEvent> Read(IEnumerable<string> tags)
+        /// <summary>
+        /// Read tags
+        /// </summary>
+        /// <param name="tags">The fully-qualified identifiers of the tags. You can specify a subfolder by using a comma delimited name.
+        /// E.g: the tag `foo.bar` reads the tag `bar` on the folder `foo`</param>
+        /// <returns>The key value pairs retrieved from the OPC</returns>
+        IDictionary<string, ReadEvent> Read(IEnumerable<string> tags);
+        #endregion
+
         #region Write a value on the specified opc tag —— void Write<T>(string tag, T item)
         /// <summary>
         /// Write a value on the specified opc tag
