@@ -129,6 +129,17 @@ namespace Hylasoft.Opc.Common
         void Monitor(IEnumerable<string> tags, Action<IDictionary<string, ReadEvent>, Action> callback);
         #endregion
 
+        #region Monitor the specified tags for changes —— void MonitorChanges(IEnumerable<string> tags...
+        /// <summary>
+        /// Monitor the specified tags for changes
+        /// </summary>
+        /// <param name="tags">The fully-qualified identifier of the tag. You can specify a subfolder by using a comma delimited name.
+        /// E.g: the tag `foo.bar` monitors the tag `bar` on the folder `foo`</param>
+        /// <param name="callback">the callback to execute when the value is changed.
+        /// The first parameter is the new values of the nodes, the second is an `unsubscribe` function to unsubscribe the callback</param>
+        void MonitorChanges(IEnumerable<string> tags, Action<IDictionary<string, ReadEvent>, Action> callback);
+        #endregion
+
         #endregion
     }
 }

@@ -3,6 +3,7 @@ using Opc.Ua;
 using Opc.Ua.Client;
 using Opc.Ua.Configuration;
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
@@ -524,6 +525,86 @@ namespace Hylasoft.Opc.Ua
                     {
                         readEvents.Add(tagNo, monitorEvent);
                     }
+
+                    callback(readEvents, unsubscribe);
+                };
+            }
+
+            this._session.AddSubscription(sub);
+            sub.Create();
+            sub.ApplyChanges();
+        }
+        #endregion
+
+        #region Monitor the specified tags for changes —— void MonitorChanges(IEnumerable<string> tags...
+        /// <summary>
+        /// Monitor the specified tags for changes
+        /// </summary>
+        /// <param name="tags">The fully-qualified identifier of the tag. You can specify a subfolder by using a comma delimited name.
+        /// E.g: the tag `foo.bar` monitors the tag `bar` on the folder `foo`</param>
+        /// <param name="callback">the callback to execute when the value is changed.
+        /// The first parameter is the new values of the nodes, the second is an `unsubscribe` function to unsubscribe the callback</param>
+        public void MonitorChanges(IEnumerable<string> tags, Action<IDictionary<string, ReadEvent>, Action> callback)
+        {
+            //Updated by Lee
+
+            #region # Check
+
+            tags = tags?.Distinct().ToArray() ?? new string[0];
+            if (!tags.Any())
+            {
+                throw new ArgumentNullException(nameof(tags), "tags cannot be empty !");
+            }
+
+            #endregion
+
+            Subscription sub = new Subscription
+            {
+                PublishingInterval = this.MonitorInterval ?? DefaultMonitorInterval,
+                PublishingEnabled = true,
+                LifetimeCount = this._options.SubscriptionLifetimeCount,
+                KeepAliveCount = this._options.SubscriptionKeepAliveCount,
+                DisplayName = string.Join(",", tags),
+                Priority = byte.MaxValue
+            };
+            Action unsubscribe = () =>
+            {
+                sub.RemoveItems(sub.MonitoredItems);
+                sub.Delete(true);
+                this._session.RemoveSubscription(sub);
+                sub.Dispose();
+            };
+
+            foreach (string tag in tags)
+            {
+                NodeId nodeId = new NodeId(tag);
+
+                MonitoredItem item = new MonitoredItem
+                {
+                    StartNodeId = nodeId,
+                    AttributeId = Attributes.Value,
+                    DisplayName = tag,
+                    SamplingInterval = this.MonitorInterval ?? DefaultMonitorInterval
+                };
+                sub.AddItem(item);
+
+                item.Notification += (monitoredItem, args) =>
+                {
+                    IDictionary<string, ReadEvent> readEvents = new ConcurrentDictionary<string, ReadEvent>();
+
+                    MonitoredItemNotification monitoredItemNotification = (MonitoredItemNotification)args.NotificationValue;
+
+                    ReadEvent monitorEvent = new ReadEvent
+                    {
+                        Value = monitoredItemNotification.Value.WrappedValue.Value,
+                        SourceTimestamp = monitoredItemNotification.Value.SourceTimestamp,
+                        ServerTimestamp = monitoredItemNotification.Value.ServerTimestamp
+                    };
+                    if (StatusCode.IsGood(monitoredItemNotification.Value.StatusCode)) monitorEvent.Quality = Quality.Good;
+                    if (StatusCode.IsBad(monitoredItemNotification.Value.StatusCode)) monitorEvent.Quality = Quality.Bad;
+
+                    string tagNo = monitoredItem.StartNodeId.ToString();
+                    readEvents.Add(tagNo, monitorEvent);
 
                     callback(readEvents, unsubscribe);
                 };
