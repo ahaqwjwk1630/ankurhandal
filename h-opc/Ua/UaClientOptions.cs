@@ -29,11 +29,6 @@ namespace Hylasoft.Opc.Ua
         public string ConfigSectionName { get; set; }
 
         /// <summary>
-        /// default monitor interval in Milliseconds.
-        /// </summary>
-        public int DefaultMonitorInterval { get; set; }
-
-        /// <summary>
         /// Specifies a name to be associated with the created sessions.
         /// </summary>
         public string SessionName { get; set; }
@@ -105,7 +100,6 @@ namespace Hylasoft.Opc.Ua
             this.ApplicationName = "h-opc-client";
             this.AutoAcceptUntrustedCertificates = true;
             this.ConfigSectionName = "h-opc-client";
-            this.DefaultMonitorInterval = 100;
             this.SessionName = "h-opc-client";
             this.SessionTimeout = 60000U;
             this.UseMessageSecurity = false;

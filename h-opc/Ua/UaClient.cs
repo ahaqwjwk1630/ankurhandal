@@ -19,6 +19,11 @@ namespace Hylasoft.Opc.Ua
         #region # Events, Fields and Constructors
 
         /// <summary>
+        /// Default monitor interval in Milliseconds
+        /// </summary>
+        private const int DefaultMonitorInterval = 100;
+
+        /// <summary>
         /// This event is raised when the connection to the OPC server is lost.
         /// </summary>
         public event EventHandler ServerConnectionLost;
@@ -336,7 +341,7 @@ namespace Hylasoft.Opc.Ua
 
             Subscription sub = new Subscription
             {
-                PublishingInterval = this._options.DefaultMonitorInterval,
+                PublishingInterval = this.MonitorInterval ?? DefaultMonitorInterval,
                 PublishingEnabled = true,
                 LifetimeCount = this._options.SubscriptionLifetimeCount,
                 KeepAliveCount = this._options.SubscriptionKeepAliveCount,
@@ -349,7 +354,7 @@ namespace Hylasoft.Opc.Ua
                 StartNodeId = nodeId,
                 AttributeId = Attributes.Value,
                 DisplayName = tag,
-                SamplingInterval = this._options.DefaultMonitorInterval
+                SamplingInterval = this.MonitorInterval ?? DefaultMonitorInterval,
             };
             sub.AddItem(item);
             this._session.AddSubscription(sub);
@@ -398,7 +403,7 @@ namespace Hylasoft.Opc.Ua
 
             Subscription sub = new Subscription
             {
-                PublishingInterval = this._options.DefaultMonitorInterval,
+                PublishingInterval = this.MonitorInterval ?? DefaultMonitorInterval,
                 PublishingEnabled = true,
                 LifetimeCount = this._options.SubscriptionLifetimeCount,
                 KeepAliveCount = this._options.SubscriptionKeepAliveCount,
@@ -411,7 +416,7 @@ namespace Hylasoft.Opc.Ua
                 StartNodeId = nodeId,
                 AttributeId = Attributes.Value,
                 DisplayName = tag,
-                SamplingInterval = this._options.DefaultMonitorInterval
+                SamplingInterval = this.MonitorInterval ?? DefaultMonitorInterval
             };
             sub.AddItem(item);
             this._session.AddSubscription(sub);
@@ -468,7 +473,7 @@ namespace Hylasoft.Opc.Ua
 
             Subscription sub = new Subscription
             {
-                PublishingInterval = this._options.DefaultMonitorInterval,
+                PublishingInterval = this.MonitorInterval ?? DefaultMonitorInterval,
                 PublishingEnabled = true,
                 LifetimeCount = this._options.SubscriptionLifetimeCount,
                 KeepAliveCount = this._options.SubscriptionKeepAliveCount,
@@ -493,7 +498,7 @@ namespace Hylasoft.Opc.Ua
                     StartNodeId = nodeId,
                     AttributeId = Attributes.Value,
                     DisplayName = tag,
-                    SamplingInterval = this._options.DefaultMonitorInterval
+                    SamplingInterval = this.MonitorInterval ?? DefaultMonitorInterval
                 };
                 sub.AddItem(item);
 
